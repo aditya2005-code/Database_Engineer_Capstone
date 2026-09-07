@@ -1,212 +1,179 @@
-# Little Lemon MySQL Exercise: Stored Procedures & Prepared Statements
+# Little Lemon MySQL Exercise: Bookings, Stored Procedures, and Transactions
 
 ## 1. Overview
-This module implements database automation routines for the **Little Lemon** restaurant database management system (`LittleLemonDB`), focusing on:
-1. **`GetMaxQuantity` Stored Procedure**: Encapsulating analytics to dynamically retrieve the peak order volume.
-2. **`GetOrderDetail` Prepared Statement**: Protecting against SQL injection and improving execution performance by parameterizing customer order lookups.
-3. **`CancelOrder` Stored Procedure**: Automating transactional order cancellations safely via an input parameter.
+This module implements reservation integrity and transaction management for the **Little Lemon** database (`LittleLemonDB`), focusing on:
+1. Populating the `Bookings` table with baseline reservation data.
+2. Developing the **`CheckBooking`** stored procedure to check table availability on a given date.
+3. Developing the **`AddValidBooking`** stored procedure using ACID transactions (`START TRANSACTION`, `COMMIT`, `ROLLBACK`) to prevent double-booking.
 
 ---
 
 ## 2. Actual Schema Inspection & Discovered Mapping
 
-Read-only inspection of the `LittleLemonDB` database schema reveals the following physical structure for the target `Orders` table:
+Read-only inspection of the `Bookings` table in `LittleLemonDB` confirms:
 
 ```sql
-DESCRIBE `Orders`;
+DESCRIBE `Bookings`;
 ```
 
 | Discovered Column | Physical Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| **`OrderID`** | `INT` | `PRIMARY KEY, AUTO_INCREMENT` | Unique order transaction identifier |
-| **`OrderDate`** | `DATE` | `NOT NULL` | Date when the order was placed |
-| **`Quantity`** | `INT` | `NOT NULL, CHECK (Quantity > 0)` | Discrete count of items ordered |
-| **`TotalCost`** | `DECIMAL(10,2)` | `NOT NULL, CHECK (TotalCost >= 0.00)` | Financial transaction total (Cost) |
+| **`BookingID`** | `INT` | `PRIMARY KEY, AUTO_INCREMENT` | Unique booking identifier |
+| **`BookingDate`** | `DATE` | `NOT NULL` | Date of the reservation |
+| **`TableNumber`** | `INT` | `NOT NULL` | Table reserved (e.g., 2, 3, 5) |
 | **`CustomerID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `CustomerDetails(CustomerID)` |
-| **`MenuID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `Menu(MenuID)` |
-| **`StaffID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `StaffInformation(StaffID)` |
-
-### Critical Schema Takeaways:
-* The quantity column is named **`Quantity`**.
-* The financial total column is named **`TotalCost`**. In the prepared statement, we expose it as `Cost` (`TotalCost AS Cost`) to satisfy course naming conventions.
-* The primary key is **`OrderID`** of type `INT`.
-* The customer reference is **`CustomerID`** of type `INT`.
+| **`StaffID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `StaffInformation(StaffID)` (if present) |
 
 ---
 
 ## 3. Detailed Task Explanations
 
-### TASK 1 — `GetMaxQuantity` (Stored Procedure)
-* **Objective**: Query the `Orders` table and display the highest single order quantity without requiring user parameters.
-* **Logic**:
+### TASK 1 — Populating the Bookings Table
+* **Required Records**:
+  * Booking 1: `2022-10-10`, Table `5`, Customer `1`
+  * Booking 2: `2022-11-12`, Table `3`, Customer `3`
+  * Booking 3: `2022-10-11`, Table `2`, Customer `2`
+  * Booking 4: `2022-10-13`, Table `2`, Customer `1`
+* **Integrity Guard**:
+  To satisfy foreign key constraints, prerequisite customer records (`CustomerID` 1, 2, 3) and a staff record are verified or staged before insertion.
+* **SQL Statement**:
   ```sql
-  DELIMITER //
-  CREATE PROCEDURE GetMaxQuantity()
-  BEGIN
-      SELECT MAX(Quantity) AS `Max Quantity in Order`
-      FROM Orders;
-  END //
-  DELIMITER ;
+  INSERT INTO Bookings (BookingID, BookingDate, TableNumber, CustomerID, StaffID)
+  VALUES
+      (1, '2022-10-10', 5, 1, 1),
+      (2, '2022-11-12', 3, 3, 1),
+      (3, '2022-10-11', 2, 2, 1),
+      (4, '2022-10-13', 2, 1, 1)
+  ON DUPLICATE KEY UPDATE
+      BookingDate = VALUES(BookingDate),
+      TableNumber = VALUES(TableNumber),
+      CustomerID = VALUES(CustomerID);
   ```
-* **Invocation**:
-  ```sql
-  CALL GetMaxQuantity();
-  ```
-* **How It Works**:
-  The database engine executes `MAX(Quantity)` across all rows in `Orders` and returns the scalar maximum under the column header `Max Quantity in Order`.
 
 ---
 
-### TASK 2 — `GetOrderDetail` (Prepared Statement)
-* **Objective**: Create a parameterized prepared statement that accepts a `CustomerID` dynamically through a session variable and returns that customer's `OrderID`, `Quantity`, and `Cost`.
-* **Security & Architecture**:
-  Prepared statements pre-compile the SQL structure on the database server. Binding parameters using placeholders (`?`) ensures user input is strictly treated as literal data, eliminating SQL injection vulnerabilities.
-* **Workflow**:
-  1. **Prepare Statement**:
+### TASK 2 — How `CheckBooking` Works
+* **Objective**: Check if a requested table is booked on a specific calendar date.
+* **Parameters**:
+  * `booking_date` (`DATE`)
+  * `table_number` (`INT`)
+* **Logic Flow**:
+  1. Declares an integer variable: `DECLARE booking_count INT DEFAULT 0;`.
+  2. Executes:
      ```sql
-     PREPARE GetOrderDetail FROM
-         'SELECT OrderID, Quantity, TotalCost AS Cost
-          FROM Orders
-          WHERE CustomerID = ?';
+     SELECT COUNT(*) INTO booking_count
+     FROM Bookings
+     WHERE BookingDate = booking_date AND TableNumber = table_number;
      ```
-  2. **Set Variable (`id = 1`)**:
-     ```sql
-     SET @id = 1;
-     ```
-  3. **Execute Using Variable**:
-     ```sql
-     EXECUTE GetOrderDetail USING @id;
-     ```
-  4. **Deallocate / Clean Up**:
-     ```sql
-     DEALLOCATE PREPARE GetOrderDetail;
-     ```
-     *(Deallocating frees server-side memory allocated to the cached execution plan once query operations are complete).*
+  3. Uses an `IF ... ELSE` block:
+     * If `booking_count > 0`: Returns `Table <number> is already booked`.
+     * Otherwise: Returns `Table <number> is available`.
+* **Example Invocation**:
+  ```sql
+  CALL CheckBooking('2022-11-12', 3);
+  ```
 
 ---
 
-### TASK 3 — `CancelOrder` (Stored Procedure)
-* **Objective**: Delete an order from the `Orders` table based on an `OrderID` passed as an input argument (`IN order_id INT`).
-* **Logic**:
-  ```sql
-  DELIMITER //
-  CREATE PROCEDURE CancelOrder(IN order_id INT)
-  BEGIN
-      DELETE FROM Orders
-      WHERE OrderID = order_id;
+### TASK 3 — How `AddValidBooking` & Transactions Work
+* **Objective**: Ensure transactional atomicity when booking a table, automatically rolling back any attempt to reserve an already-booked table.
 
-      SELECT CONCAT('Order ', order_id, ' is cancelled') AS Confirmation;
-  END //
-  DELIMITER ;
-  ```
-* **Invocation**:
-  ```sql
-  CALL CancelOrder(<target_order_id>);
-  ```
+#### Order of Operations:
+$$\text{START TRANSACTION} \longrightarrow \text{Attempt INSERT} \longrightarrow \text{Count Records} \longrightarrow \begin{cases} \text{Count} > 1 \implies \mathbf{ROLLBACK} \\ \text{Count} = 1 \implies \mathbf{COMMIT} \end{cases}$$
 
-> [!WARNING]
-> ### Safety Warning for `CancelOrder`
-> Because `CancelOrder` performs a destructive permanent `DELETE` operation:
-> 1. **Do not run `CancelOrder` blindly** or on production records.
-> 2. **Pre-Verify**: Always inspect the table first:
->    ```sql
->    SELECT * FROM Orders WHERE OrderID = <target_order_id>;
->    ```
-> 3. **Cascade Impact**: If foreign keys with `ON DELETE CASCADE` exist (such as `OrderDeliveryStatus`), child records linked to that `OrderID` will also be deleted.
-> 4. **Only execute when explicitly ready**: `CALL CancelOrder(5);`.
+1. **`START TRANSACTION;`**:
+   Suspends autocommit mode, starting a new ACID transaction block. Changes made inside this block remain provisional until committed.
+2. **Attempt `INSERT`**:
+   The procedure inserts the provisional reservation row with the user-supplied `booking_date` and `table_number`.
+3. **Collision Detection**:
+   ```sql
+   SELECT COUNT(*) INTO existing_count
+   FROM Bookings
+   WHERE BookingDate = booking_date AND TableNumber = table_number;
+   ```
+   Because our provisional row was just inserted, if `existing_count > 1`, a reservation was **already booked** for that table and date prior to our insert!
+4. **How `ROLLBACK` Handles an Already-Booked Table**:
+   When `existing_count > 1`, MySQL issues a `ROLLBACK;`. The provisional `INSERT` is entirely undone and discarded. No duplicate or orphaned record remains in `Bookings`. The procedure returns:
+   `Table <number> is already booked - booking cancelled`.
+5. **How `COMMIT` Handles an Available Table**:
+   When `existing_count = 1`, only our newly inserted reservation exists. MySQL executes `COMMIT;`. The reservation is permanently written to disk, and the procedure returns:
+   `Table <number> booked successfully`.
 
 ---
 
-## 4. MySQL Workbench Step-by-Step Workflow
+## 4. Testing Both Scenarios in MySQL Workbench
 
-Follow these steps in **MySQL Workbench**:
+Follow these steps to safely test both transaction outcomes:
 
-### Step 1: Open SQL Editor & Set Schema
-* **MY ACTION**:
-  1. Launch **MySQL Workbench** and connect to your local MySQL Server.
-  2. Open a new SQL Editor tab (`Ctrl + T`).
-* **SQL TO RUN**:
-  ```sql
-  USE LittleLemonDB;
-  ```
+### Pre-requisite: Open Script
+Launch MySQL Workbench, connect to your server, and open [`little_lemon_bookings.sql`](file:///d:/Projects/ASSESSMENT/little_lemon_bookings.sql).
 
-### Step 2: Create `GetMaxQuantity` Procedure
-* **MY ACTION**:
-  1. Open [`little_lemon_procedures.sql`](file:///d:/Projects/ASSESSMENT/little_lemon_procedures.sql) in Workbench.
-  2. Highlight the `DELIMITER // ... CREATE PROCEDURE GetMaxQuantity ... DELIMITER ;` block.
-  3. Click the **Execute** (lightning bolt) button.
-* **SQL TO RUN**:
-  ```sql
-  CALL GetMaxQuantity();
-  ```
-* **Verify**: The Result Grid displays a single row with the maximum quantity value.
+---
 
-### Step 3: Create and Test `GetOrderDetail` Prepared Statement
-* **MY ACTION**:
-  1. Highlight the `PREPARE GetOrderDetail FROM ...` block and execute.
-  2. Set the variable `@id = 1;` and execute.
-  3. Execute `EXECUTE GetOrderDetail USING @id;`.
-* **SQL TO RUN**:
-  ```sql
-  PREPARE GetOrderDetail FROM
-      'SELECT OrderID, Quantity, TotalCost AS Cost
-       FROM Orders
-       WHERE CustomerID = ?';
+### TEST CASE 1: Available Table (Successful COMMIT)
+1. **Verify table is empty before booking**:
+   ```sql
+   SELECT * FROM Bookings WHERE BookingDate = '2022-12-17' AND TableNumber = 6;
+   ```
+   *(Returns 0 rows).*
+2. **Call `AddValidBooking`**:
+   ```sql
+   CALL AddValidBooking('2022-12-17', 6);
+   ```
+   *Expected Output Grid*: `Table 6 booked successfully`.
+3. **Verify record committed**:
+   ```sql
+   SELECT * FROM Bookings WHERE BookingDate = '2022-12-17' AND TableNumber = 6;
+   ```
+   *Expected Result*: **1 row exists**, showing the committed reservation.
 
-  SET @id = 1;
-  EXECUTE GetOrderDetail USING @id;
-  ```
-* **Verify**: The Result Grid displays all order rows for Customer 1 with columns `OrderID`, `Quantity`, and `Cost`.
-* **Cleanup**:
-  ```sql
-  DEALLOCATE PREPARE GetOrderDetail;
-  ```
+---
 
-### Step 4: Create and Safely Test `CancelOrder` Procedure
-* **MY ACTION**:
-  1. Highlight and execute the `CREATE PROCEDURE CancelOrder ...` statement block.
-  2. **Audit step**: Query the `Orders` table to choose an ID to test:
-     ```sql
-     SELECT OrderID, CustomerID, TotalCost FROM Orders ORDER BY OrderID ASC;
-     ```
-  3. Verify the target order exists before running the procedure:
-     ```sql
-     SELECT * FROM Orders WHERE OrderID = 5;
-     ```
-  4. Call the procedure with your chosen ID:
-     ```sql
-     CALL CancelOrder(5);
-     ```
-* **Verify**:
-  * Output grid displays: `Order 5 is cancelled`.
-  * Running `SELECT * FROM Orders WHERE OrderID = 5;` returns **0 rows**, confirming successful deletion.
+### TEST CASE 2: Already-Booked Table (Safe ROLLBACK)
+1. **Verify table already exists**:
+   ```sql
+   SELECT * FROM Bookings WHERE BookingDate = '2022-10-10' AND TableNumber = 5;
+   ```
+   *(Returns BookingID 1 from Task 1).*
+2. **Call `AddValidBooking` with the conflicting combination**:
+   ```sql
+   CALL AddValidBooking('2022-10-10', 5);
+   ```
+   *Expected Output Grid*: `Table 5 is already booked - booking cancelled`.
+3. **Verify ROLLBACK eliminated duplicate**:
+   ```sql
+   SELECT COUNT(*) AS record_count 
+   FROM Bookings 
+   WHERE BookingDate = '2022-10-10' AND TableNumber = 5;
+   ```
+   *Expected Result*: **Exactly 1 row remains** (the original booking). The conflicting insert was cleanly rolled back with zero leftover duplicate rows.
 
 ---
 
 ## 5. Final Validation Checklist
 
-### Task 1: `GetMaxQuantity`
-- [x] Procedure is named `GetMaxQuantity`
-- [x] No input parameter is required
-- [x] Uses `MAX(Quantity)` aggregate function
-- [x] Reads directly from `Orders` table
-- [x] Invocation command `CALL GetMaxQuantity();` provided and verified
+### TASK 1: Populate Bookings Table
+- [x] Four required booking records prepared (IDs 1, 2, 3, 4)
+- [x] Pre-population query checks existing records to prevent blind duplicates
+- [x] Foreign keys (`CustomerID`, `StaffID`) handled safely
+- [x] Verification query `SELECT BookingID, BookingDate, TableNumber, CustomerID FROM Bookings;` provided
 
-### Task 2: `GetOrderDetail`
-- [x] Prepared statement is named `GetOrderDetail`
-- [x] Uses parameter placeholder `?` bound to `CustomerID`
-- [x] Returns `OrderID`, `Quantity`, and `Cost` (`TotalCost AS Cost`)
-- [x] Variable `@id` declared and assigned `1`
-- [x] Executed via `EXECUTE GetOrderDetail USING @id;`
-- [x] Does not use hardcoded literal values in query string
-- [x] Cleanup command `DEALLOCATE PREPARE GetOrderDetail;` provided
+### TASK 2: `CheckBooking`
+- [x] Procedure named `CheckBooking`
+- [x] Accepts two input parameters (`booking_date DATE`, `table_number INT`)
+- [x] Declares variable to capture status
+- [x] Uses `BookingDate = input AND TableNumber = input`
+- [x] Produces clear result (`Already booked` vs `Available`)
+- [x] Example invocation statements provided
 
-### Task 3: `CancelOrder`
-- [x] Procedure is named `CancelOrder`
-- [x] Accepts `IN order_id INT` as input parameter
-- [x] Uses `DELETE FROM Orders WHERE OrderID = order_id;`
-- [x] Deletes only the matching order
-- [x] Confirmation message returned via `SELECT CONCAT(...)`
-- [x] Invocation command `CALL CancelOrder(<order_id>);` provided
-- [x] Clear pre-execution verification and safety warning provided
-- [x] Does not auto-execute destructive delete
+### TASK 3: `AddValidBooking` (Transactions)
+- [x] Procedure named `AddValidBooking`
+- [x] Accepts two input parameters (`booking_date DATE`, `table_number INT`)
+- [x] Declares integer variable `existing_count`
+- [x] Begins transaction with `START TRANSACTION;`
+- [x] Attempts `INSERT` using parameter values
+- [x] Evaluates `IF ... ELSE` condition
+- [x] Executes `ROLLBACK;` when collision detected
+- [x] Executes `COMMIT;` when table is available
+- [x] Proves duplicate booking does not remain after rollback
+- [x] Both test cases documented with safe verification queries
