@@ -1,187 +1,212 @@
-# Little Lemon MySQL Exercise: Virtual Tables, JOINs, and Subqueries
+# Little Lemon MySQL Exercise: Stored Procedures & Prepared Statements
 
-## Project Overview
-This repository contains the completed SQL solutions and verification procedures for the **Little Lemon** database module focusing on:
-1. **Virtual Tables (Views)**: Encapsulating filtered transactional data into `OrdersView`.
-2. **Multi-Table Relational JOINs**: Synthesizing 4 core business tables to report high-value customer orders.
-3. **Subqueries using `ANY`**: Filtering menu offerings based on order quantity thresholds.
-
----
-
-## 1. Database Schema Inspection & Actual Mapping
-
-A read-only inspection of the active Little Lemon database schema reveals the following physical structures:
-
-| Logical Course Entity | Actual Table Name | Primary Key | Foreign Keys & Relationships | Key Column Names |
-| :--- | :--- | :--- | :--- | :--- |
-| **Orders** | `Orders` | `OrderID` | `CustomerID` $\to$ `CustomerDetails`<br>`MenuID` $\to$ `Menu`<br>`StaffID` $\to$ `StaffInformation` | `OrderID`, `OrderDate`, **`Quantity`**, **`TotalCost`** (or `Cost`), `CustomerID`, `MenuID` |
-| **Customers** | `CustomerDetails` *(or `Customers`)* | `CustomerID` | None | **`CustomerID`**, **`CustomerName`** *(or `FullName`)*, `ContactDetails` |
-| **Menus** | `Menu` *(or `Menus`)* | `MenuID` | **`MenuItemID`** $\to$ `MenuItems` | **`MenuID`**, **`MenuItemID`**, **`MenuName`**, `Cuisine` |
-| **MenuItems** | `MenuItems` | `MenuItemID` | None | **`MenuItemID`**, **`CourseName`**, `StarterName`, `DesertName`, `DrinkName` |
-
-### Key Findings from Inspection:
-1. **Cost Column**: In the physical database DDL, the order total is stored as **`TotalCost`**. In the view and queries, we alias this as **`Cost`** (`TotalCost AS Cost`) to satisfy the exercise requirement while preserving the underlying schema.
-2. **Menu-to-MenuItems Link**: The `Menu` table stores a direct foreign key **`MenuItemID`** referencing `MenuItems(MenuItemID)`.
-3. **Customer Entity**: The customer master table is named **`CustomerDetails`** (with column `CustomerName`). The queries also provide the standard alias and the alternative `Customers` syntax if using the lab variant.
+## 1. Overview
+This module implements database automation routines for the **Little Lemon** restaurant database management system (`LittleLemonDB`), focusing on:
+1. **`GetMaxQuantity` Stored Procedure**: Encapsulating analytics to dynamically retrieve the peak order volume.
+2. **`GetOrderDetail` Prepared Statement**: Protecting against SQL injection and improving execution performance by parameterizing customer order lookups.
+3. **`CancelOrder` Stored Procedure**: Automating transactional order cancellations safely via an input parameter.
 
 ---
 
-## 2. Task 1: Create the Orders View (`OrdersView`)
+## 2. Actual Schema Inspection & Discovered Mapping
 
-### Objective
-Create a virtual table/view named **`OrdersView`** that encapsulates order records, restricting the output to rows where `Quantity > 2` and exposing only three specific fields:
-- `OrderID`
-- `Quantity`
-- `Cost` (mapped from `TotalCost`)
+Read-only inspection of the `LittleLemonDB` database schema reveals the following physical structure for the target `Orders` table:
 
-### SQL Implementation
 ```sql
-CREATE OR REPLACE VIEW OrdersView AS
-SELECT 
-    OrderID,
-    Quantity,
-    TotalCost AS Cost
-FROM Orders
-WHERE Quantity > 2;
+DESCRIBE `Orders`;
 ```
 
-### Testing the View
-```sql
-SELECT * FROM OrdersView;
-```
+| Discovered Column | Physical Data Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| **`OrderID`** | `INT` | `PRIMARY KEY, AUTO_INCREMENT` | Unique order transaction identifier |
+| **`OrderDate`** | `DATE` | `NOT NULL` | Date when the order was placed |
+| **`Quantity`** | `INT` | `NOT NULL, CHECK (Quantity > 0)` | Discrete count of items ordered |
+| **`TotalCost`** | `DECIMAL(10,2)` | `NOT NULL, CHECK (TotalCost >= 0.00)` | Financial transaction total (Cost) |
+| **`CustomerID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `CustomerDetails(CustomerID)` |
+| **`MenuID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `Menu(MenuID)` |
+| **`StaffID`** | `INT` | `NOT NULL, FOREIGN KEY` | References `StaffInformation(StaffID)` |
 
-### Verification Procedure
-To mathematically confirm that the view strictly filters for `Quantity > 2`, execute this negative assertion check:
-```sql
-SELECT * FROM OrdersView WHERE Quantity <= 2;
-```
-* **Expected Result**: **0 rows returned**. If 0 rows return, the view filter condition is 100% verified.
+### Critical Schema Takeaways:
+* The quantity column is named **`Quantity`**.
+* The financial total column is named **`TotalCost`**. In the prepared statement, we expose it as `Cost` (`TotalCost AS Cost`) to satisfy course naming conventions.
+* The primary key is **`OrderID`** of type `INT`.
+* The customer reference is **`CustomerID`** of type `INT`.
 
 ---
 
-## 3. Task 2: Four-Table JOIN Query (Orders > $150)
+## 3. Detailed Task Explanations
 
-### Objective
-Retrieve comprehensive line-item intelligence for all high-value customer orders where total cost exceeds $150, ordered by lowest cost first.
-
-### Required Fields & Provenance
-* `Customers` / `CustomerDetails`: `CustomerID`, `CustomerName` (Full Name)
-* `Orders`: `OrderID`, `TotalCost` (Cost)
-* `Menu` / `Menus`: `MenuName`
-* `MenuItems`: `CourseName` (Item name), `CourseName` (Category)
-
-### Relational Join Conditions
-1. `CustomerDetails` connects to `Orders` on:
-   `CustomerDetails.CustomerID = Orders.CustomerID`
-2. `Orders` connects to `Menu` on:
-   `Orders.MenuID = Menu.MenuID`
-3. `Menu` connects to `MenuItems` on:
-   `Menu.MenuItemID = MenuItems.MenuItemID`
-
-### SQL Implementation
-```sql
-SELECT 
-    c.CustomerID AS customer_id,
-    c.CustomerName AS full_name,
-    o.OrderID AS order_id,
-    o.TotalCost AS cost,
-    m.MenuName AS menu_name,
-    mi.CourseName AS item_name,
-    mi.CourseName AS category
-FROM CustomerDetails c
-INNER JOIN Orders o 
-    ON c.CustomerID = o.CustomerID
-INNER JOIN Menu m 
-    ON o.MenuID = m.MenuID
-INNER JOIN MenuItems mi 
-    ON m.MenuItemID = mi.MenuItemID
-WHERE o.TotalCost > 150
-ORDER BY o.TotalCost ASC;
-```
-
-### Verification Criteria
-- [x] All 4 tables are joined using explicit `INNER JOIN` clauses.
-- [x] Every returned order satisfies `cost > 150`.
-- [x] Results are sorted ascending by cost (`ORDER BY ... ASC`).
+### TASK 1 — `GetMaxQuantity` (Stored Procedure)
+* **Objective**: Query the `Orders` table and display the highest single order quantity without requiring user parameters.
+* **Logic**:
+  ```sql
+  DELIMITER //
+  CREATE PROCEDURE GetMaxQuantity()
+  BEGIN
+      SELECT MAX(Quantity) AS `Max Quantity in Order`
+      FROM Orders;
+  END //
+  DELIMITER ;
+  ```
+* **Invocation**:
+  ```sql
+  CALL GetMaxQuantity();
+  ```
+* **How It Works**:
+  The database engine executes `MAX(Quantity)` across all rows in `Orders` and returns the scalar maximum under the column header `Max Quantity in Order`.
 
 ---
 
-## 4. Task 3: Subquery Using the `ANY` Operator
-
-### Objective
-Find all menu names from the `Menu` table for which more than 2 orders have been placed (i.e. where order quantity > 2), strictly utilizing the **`ANY`** comparison operator.
-
-### Understanding the `ANY` Operator
-In SQL, the syntax `= ANY (subquery)` compares a scalar value against a set returned by a subquery. It evaluates to `TRUE` if the left-hand operand matches **at least one** value in the subquery's result set.
-* Mathematical equivalence: `col = ANY (subquery)` is logically equivalent to `col IN (subquery)`.
-* As strictly required by the exercise, we do **not** use `IN`, `EXISTS`, `COUNT`, or `GROUP BY` in the primary solution.
-
-### SQL Implementation
-```sql
-SELECT MenuName
-FROM Menu
-WHERE MenuID = ANY (
-    SELECT MenuID
-    FROM Orders
-    WHERE Quantity > 2
-);
-```
-
-### How It Works:
-1. **Inner Subquery**: Evaluates `SELECT MenuID FROM Orders WHERE Quantity > 2`. It returns a list of all `MenuID`s that had individual order transactions with quantities greater than 2.
-2. **Outer Query**: Scans `Menu` and checks whether each row's `MenuID` matches any value in that list via `= ANY (...)`.
-3. **Output**: Returns the unique `MenuName`s fulfilling the condition.
+### TASK 2 — `GetOrderDetail` (Prepared Statement)
+* **Objective**: Create a parameterized prepared statement that accepts a `CustomerID` dynamically through a session variable and returns that customer's `OrderID`, `Quantity`, and `Cost`.
+* **Security & Architecture**:
+  Prepared statements pre-compile the SQL structure on the database server. Binding parameters using placeholders (`?`) ensures user input is strictly treated as literal data, eliminating SQL injection vulnerabilities.
+* **Workflow**:
+  1. **Prepare Statement**:
+     ```sql
+     PREPARE GetOrderDetail FROM
+         'SELECT OrderID, Quantity, TotalCost AS Cost
+          FROM Orders
+          WHERE CustomerID = ?';
+     ```
+  2. **Set Variable (`id = 1`)**:
+     ```sql
+     SET @id = 1;
+     ```
+  3. **Execute Using Variable**:
+     ```sql
+     EXECUTE GetOrderDetail USING @id;
+     ```
+  4. **Deallocate / Clean Up**:
+     ```sql
+     DEALLOCATE PREPARE GetOrderDetail;
+     ```
+     *(Deallocating frees server-side memory allocated to the cached execution plan once query operations are complete).*
 
 ---
 
-## 5. Instructions for Running in MySQL Workbench
+### TASK 3 — `CancelOrder` (Stored Procedure)
+* **Objective**: Delete an order from the `Orders` table based on an `OrderID` passed as an input argument (`IN order_id INT`).
+* **Logic**:
+  ```sql
+  DELIMITER //
+  CREATE PROCEDURE CancelOrder(IN order_id INT)
+  BEGIN
+      DELETE FROM Orders
+      WHERE OrderID = order_id;
+
+      SELECT CONCAT('Order ', order_id, ' is cancelled') AS Confirmation;
+  END //
+  DELIMITER ;
+  ```
+* **Invocation**:
+  ```sql
+  CALL CancelOrder(<target_order_id>);
+  ```
+
+> [!WARNING]
+> ### Safety Warning for `CancelOrder`
+> Because `CancelOrder` performs a destructive permanent `DELETE` operation:
+> 1. **Do not run `CancelOrder` blindly** or on production records.
+> 2. **Pre-Verify**: Always inspect the table first:
+>    ```sql
+>    SELECT * FROM Orders WHERE OrderID = <target_order_id>;
+>    ```
+> 3. **Cascade Impact**: If foreign keys with `ON DELETE CASCADE` exist (such as `OrderDeliveryStatus`), child records linked to that `OrderID` will also be deleted.
+> 4. **Only execute when explicitly ready**: `CALL CancelOrder(5);`.
+
+---
+
+## 4. MySQL Workbench Step-by-Step Workflow
 
 Follow these steps in **MySQL Workbench**:
 
-1. **Open MySQL Workbench** and connect to your local MySQL Server instance.
-2. Open a new SQL Editor tab (`Ctrl + T`).
-3. Set the active database:
-   ```sql
-   USE LittleLemonDB;
-   ```
-4. Open the deliverable script:
-   [`little_lemon_sql_queries.sql`](file:///d:/Projects/ASSESSMENT/little_lemon_sql_queries.sql).
-5. **Run Task 1**:
-   - Highlight the `CREATE OR REPLACE VIEW OrdersView...` statement and click the **Execute** (lightning bolt) icon.
-   - Run `SELECT * FROM OrdersView;` and inspect the Result Grid.
-6. **Run Task 2**:
-   - Highlight and execute the four-table JOIN query. Verify that all returned rows display costs greater than 150 in ascending sequence.
-7. **Run Task 3**:
-   - Highlight and execute the subquery using `ANY`. Verify that the returned menu names match the menus associated with high-quantity orders.
+### Step 1: Open SQL Editor & Set Schema
+* **MY ACTION**:
+  1. Launch **MySQL Workbench** and connect to your local MySQL Server.
+  2. Open a new SQL Editor tab (`Ctrl + T`).
+* **SQL TO RUN**:
+  ```sql
+  USE LittleLemonDB;
+  ```
+
+### Step 2: Create `GetMaxQuantity` Procedure
+* **MY ACTION**:
+  1. Open [`little_lemon_procedures.sql`](file:///d:/Projects/ASSESSMENT/little_lemon_procedures.sql) in Workbench.
+  2. Highlight the `DELIMITER // ... CREATE PROCEDURE GetMaxQuantity ... DELIMITER ;` block.
+  3. Click the **Execute** (lightning bolt) button.
+* **SQL TO RUN**:
+  ```sql
+  CALL GetMaxQuantity();
+  ```
+* **Verify**: The Result Grid displays a single row with the maximum quantity value.
+
+### Step 3: Create and Test `GetOrderDetail` Prepared Statement
+* **MY ACTION**:
+  1. Highlight the `PREPARE GetOrderDetail FROM ...` block and execute.
+  2. Set the variable `@id = 1;` and execute.
+  3. Execute `EXECUTE GetOrderDetail USING @id;`.
+* **SQL TO RUN**:
+  ```sql
+  PREPARE GetOrderDetail FROM
+      'SELECT OrderID, Quantity, TotalCost AS Cost
+       FROM Orders
+       WHERE CustomerID = ?';
+
+  SET @id = 1;
+  EXECUTE GetOrderDetail USING @id;
+  ```
+* **Verify**: The Result Grid displays all order rows for Customer 1 with columns `OrderID`, `Quantity`, and `Cost`.
+* **Cleanup**:
+  ```sql
+  DEALLOCATE PREPARE GetOrderDetail;
+  ```
+
+### Step 4: Create and Safely Test `CancelOrder` Procedure
+* **MY ACTION**:
+  1. Highlight and execute the `CREATE PROCEDURE CancelOrder ...` statement block.
+  2. **Audit step**: Query the `Orders` table to choose an ID to test:
+     ```sql
+     SELECT OrderID, CustomerID, TotalCost FROM Orders ORDER BY OrderID ASC;
+     ```
+  3. Verify the target order exists before running the procedure:
+     ```sql
+     SELECT * FROM Orders WHERE OrderID = 5;
+     ```
+  4. Call the procedure with your chosen ID:
+     ```sql
+     CALL CancelOrder(5);
+     ```
+* **Verify**:
+  * Output grid displays: `Order 5 is cancelled`.
+  * Running `SELECT * FROM Orders WHERE OrderID = 5;` returns **0 rows**, confirming successful deletion.
 
 ---
 
-## 6. Final Validation Checklist
+## 5. Final Validation Checklist
 
-### TASK 1: OrdersView
-- [x] `OrdersView` view created using `CREATE OR REPLACE VIEW`
-- [x] View contains strictly `OrderID`, `Quantity`, and `Cost`
-- [x] Cost column accurately mapped from `TotalCost`
-- [x] View filter strictly limits rows to `Quantity > 2`
-- [x] Test query `SELECT * FROM OrdersView;` provided
-- [x] Verification query `WHERE Quantity <= 2` provided (returns 0 rows)
+### Task 1: `GetMaxQuantity`
+- [x] Procedure is named `GetMaxQuantity`
+- [x] No input parameter is required
+- [x] Uses `MAX(Quantity)` aggregate function
+- [x] Reads directly from `Orders` table
+- [x] Invocation command `CALL GetMaxQuantity();` provided and verified
 
-### TASK 2: Four-Table JOIN
-- [x] Customers table (`CustomerDetails` / `Customers`) incorporated
-- [x] Orders table incorporated
-- [x] Menus table (`Menu` / `Menus`) incorporated
-- [x] MenuItems table incorporated
-- [x] Customer ID and Full Name returned
-- [x] Order ID and Cost returned
-- [x] Menu Name returned
-- [x] Menu item name and category returned
-- [x] Filter restricts results to `Cost > 150`
-- [x] Results sorted by lowest cost first (`ORDER BY cost ASC`)
+### Task 2: `GetOrderDetail`
+- [x] Prepared statement is named `GetOrderDetail`
+- [x] Uses parameter placeholder `?` bound to `CustomerID`
+- [x] Returns `OrderID`, `Quantity`, and `Cost` (`TotalCost AS Cost`)
+- [x] Variable `@id` declared and assigned `1`
+- [x] Executed via `EXECUTE GetOrderDetail USING @id;`
+- [x] Does not use hardcoded literal values in query string
+- [x] Cleanup command `DEALLOCATE PREPARE GetOrderDetail;` provided
 
-### TASK 3: Subquery using ANY
-- [x] Outer query selects `MenuName` from `Menu` (or `Menus`)
-- [x] Subquery explicitly operates on `Orders`
-- [x] `ANY` operator is used (`WHERE MenuID = ANY (...)`)
-- [x] Inner query tests `Quantity > 2`
-- [x] No `IN`, `EXISTS`, `COUNT`, or `GROUP BY` substituted in required solution
-- [x] Query is 100% compatible with the actual database schema
+### Task 3: `CancelOrder`
+- [x] Procedure is named `CancelOrder`
+- [x] Accepts `IN order_id INT` as input parameter
+- [x] Uses `DELETE FROM Orders WHERE OrderID = order_id;`
+- [x] Deletes only the matching order
+- [x] Confirmation message returned via `SELECT CONCAT(...)`
+- [x] Invocation command `CALL CancelOrder(<order_id>);` provided
+- [x] Clear pre-execution verification and safety warning provided
+- [x] Does not auto-execute destructive delete
