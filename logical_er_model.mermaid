@@ -1,0 +1,69 @@
+```mermaid
+erDiagram
+    CUSTOMERS ||--o{ BOOKINGS : "makes (1:M)"
+    STAFF ||--o{ BOOKINGS : "assigns (1:M)"
+    CUSTOMERS ||--o{ ORDERS : "places (1:M)"
+    STAFF ||--o{ ORDERS : "handles (1:M)"
+    MENUS ||--o{ ORDERS : "selected in (1:M)"
+    ORDERS ||--|| ORDER_DELIVERY_STATUS : "has (1:1)"
+    MENUS ||--|{ MENU_HAS_MENU_ITEMS : "contains (1:M)"
+    MENU_ITEMS ||--|{ MENU_HAS_MENU_ITEMS : "included in (1:M)"
+
+    CUSTOMERS {
+        int CustomerID PK
+        string FullName
+        string ContactNumber
+        string Email
+    }
+
+    STAFF {
+        int StaffID PK
+        string FullName
+        string Role
+        decimal Salary
+        string ContactNumber
+    }
+
+    BOOKINGS {
+        int BookingID PK
+        date BookingDate
+        int TableNumber
+        int CustomerID FK
+        int StaffID FK
+    }
+
+    MENUS {
+        int MenuID PK
+        string MenuName
+        string Cuisine
+    }
+
+    MENU_ITEMS {
+        int MenuItemID PK
+        string CourseName
+        string ItemName
+        decimal Price
+    }
+
+    MENU_HAS_MENU_ITEMS {
+        int MenuID PK, FK
+        int MenuItemID PK, FK
+    }
+
+    ORDERS {
+        int OrderID PK
+        date OrderDate
+        int Quantity
+        decimal TotalCost
+        int CustomerID FK
+        int MenuID FK
+        int StaffID FK
+    }
+
+    ORDER_DELIVERY_STATUS {
+        int DeliveryID PK
+        int OrderID FK, UK
+        date DeliveryDate
+        string Status
+    }
+```

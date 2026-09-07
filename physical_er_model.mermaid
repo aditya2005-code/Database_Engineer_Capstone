@@ -1,0 +1,69 @@
+```mermaid
+erDiagram
+    Customers ||--o{ Bookings : "places (1:M)"
+    Staff ||--o{ Bookings : "manages (1:M)"
+    Customers ||--o{ Orders : "initiates (1:M)"
+    Staff ||--o{ Orders : "serves (1:M)"
+    Menus ||--o{ Orders : "ordered (1:M)"
+    Orders ||--|| Order_Delivery_Status : "tracked by (1:1)"
+    Menus ||--|{ Menu_has_MenuItems : "comprises (1:M)"
+    MenuItems ||--|{ Menu_has_MenuItems : "featured in (1:M)"
+
+    Customers {
+        INT CustomerID PK
+        VARCHAR(100) FullName
+        VARCHAR(25) ContactNumber
+        VARCHAR(100) Email
+    }
+
+    Staff {
+        INT StaffID PK
+        VARCHAR(100) FullName
+        VARCHAR(50) Role
+        DECIMAL(10_2) Salary
+        VARCHAR(25) ContactNumber
+    }
+
+    Bookings {
+        INT BookingID PK
+        DATE BookingDate
+        INT TableNumber
+        INT CustomerID FK
+        INT StaffID FK
+    }
+
+    Menus {
+        INT MenuID PK
+        VARCHAR(100) MenuName
+        VARCHAR(50) Cuisine
+    }
+
+    MenuItems {
+        INT MenuItemID PK
+        VARCHAR(50) CourseName
+        VARCHAR(100) ItemName
+        DECIMAL(10_2) Price
+    }
+
+    Menu_has_MenuItems {
+        INT MenuID PK_FK
+        INT MenuItemID PK_FK
+    }
+
+    Orders {
+        INT OrderID PK
+        DATE OrderDate
+        INT Quantity
+        DECIMAL(10_2) TotalCost
+        INT CustomerID FK
+        INT MenuID FK
+        INT StaffID FK
+    }
+
+    Order_Delivery_Status {
+        INT DeliveryID PK
+        INT OrderID FK_UK
+        DATE DeliveryDate
+        VARCHAR(50) Status
+    }
+```

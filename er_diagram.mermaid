@@ -1,0 +1,69 @@
+```mermaid
+erDiagram
+    Customers ||--o{ Bookings : "places (1:M)"
+    Staff ||--o{ Bookings : "records (1:M)"
+    Customers ||--o{ Orders : "places (1:M)"
+    Staff ||--o{ Orders : "serves (1:M)"
+    Menus ||--o{ Orders : "contains (1:M)"
+    Orders ||--|| Order_Delivery_Status : "has (1:1)"
+    Menus ||--|{ Menu_has_MenuItems : "consists of (1:M)"
+    MenuItems ||--|{ Menu_has_MenuItems : "belongs to (1:M)"
+
+    Customers {
+        INT CustomerID PK "Auto Increment"
+        VARCHAR(100) FullName "NOT NULL"
+        VARCHAR(25) ContactNumber "NOT NULL"
+        VARCHAR(100) Email "NULL"
+    }
+
+    Staff {
+        INT StaffID PK "Auto Increment"
+        VARCHAR(100) FullName "NOT NULL"
+        VARCHAR(50) Role "NOT NULL"
+        DECIMAL(10_2) Salary "NOT NULL"
+        VARCHAR(25) ContactNumber "NULL"
+    }
+
+    Bookings {
+        INT BookingID PK "Auto Increment"
+        DATE BookingDate "NOT NULL"
+        INT TableNumber "NOT NULL"
+        INT CustomerID FK "NOT NULL"
+        INT StaffID FK "NOT NULL"
+    }
+
+    Menus {
+        INT MenuID PK "Auto Increment"
+        VARCHAR(100) MenuName "NOT NULL"
+        VARCHAR(50) Cuisine "NOT NULL"
+    }
+
+    MenuItems {
+        INT MenuItemID PK "Auto Increment"
+        VARCHAR(50) CourseName "NOT NULL"
+        VARCHAR(100) ItemName "NOT NULL"
+        DECIMAL(10_2) Price "NOT NULL"
+    }
+
+    Menu_has_MenuItems {
+        INT MenuID PK_FK "NOT NULL"
+        INT MenuItemID PK_FK "NOT NULL"
+    }
+
+    Orders {
+        INT OrderID PK "Auto Increment"
+        DATE OrderDate "NOT NULL"
+        INT Quantity "NOT NULL"
+        DECIMAL(10_2) TotalCost "NOT NULL"
+        INT CustomerID FK "NOT NULL"
+        INT MenuID FK "NOT NULL"
+        INT StaffID FK "NOT NULL"
+    }
+
+    Order_Delivery_Status {
+        INT DeliveryID PK "Auto Increment"
+        INT OrderID FK_UK "NOT NULL UNIQUE"
+        DATE DeliveryDate "NOT NULL"
+        VARCHAR(50) Status "NOT NULL"
+    }
+```

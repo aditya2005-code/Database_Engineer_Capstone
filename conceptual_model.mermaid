@@ -1,0 +1,56 @@
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ BOOKING : places
+    CUSTOMER ||--o{ ORDER : initiates
+    STAFF ||--o{ BOOKING : manages
+    STAFF ||--o{ ORDER : serves
+    ORDER ||--|| ORDER_DELIVERY_STATUS : tracks
+    ORDER ||--|{ MENU : contains
+    MENU }|--|{ MENU_ITEM : includes
+
+    CUSTOMER {
+        string CustomerID
+        string FullName
+        string ContactNumber
+        string Email
+    }
+
+    BOOKING {
+        string BookingID
+        date BookingDate
+        int TableNumber
+    }
+
+    STAFF {
+        string StaffID
+        string FullName
+        string Role
+        number Salary
+    }
+
+    ORDER {
+        string OrderID
+        date OrderDate
+        int Quantity
+        number TotalCost
+    }
+
+    ORDER_DELIVERY_STATUS {
+        string DeliveryID
+        date DeliveryDate
+        string Status
+    }
+
+    MENU {
+        string MenuID
+        string MenuName
+        string Cuisine
+    }
+
+    MENU_ITEM {
+        string MenuItemID
+        string ItemName
+        string CourseName
+        number Price
+    }
+```
